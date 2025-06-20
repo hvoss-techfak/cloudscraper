@@ -293,6 +293,8 @@ class CloudScraper(Session):
     # ------------------------------------------------------------------------------- #
 
     def request(self, method, url, *args, **kwargs):
+        if 'timeout' not in kwargs or kwargs['timeout'] is None:
+            kwargs['timeout'] = self.default_timeout
         # Apply request throttling to prevent TLS blocking
         self._apply_request_throttling()
 
