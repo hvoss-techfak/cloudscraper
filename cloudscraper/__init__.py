@@ -506,6 +506,13 @@ class CloudScraper(Session):
         """
         Refresh the session by clearing cookies and re-establishing connection
         """
+        if getattr(self, "_in_refresh_session", False):
+            # Already refreshing in this call-stack – escape immediately
+            #if self.debug:
+            print("Refresh skipped because another refresh is active")
+            return False
+
+        self._in_refresh_session = True
         try:
             if self.debug:
                 print('Refreshing session due to staleness or 403 errors...')
