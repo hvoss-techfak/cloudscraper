@@ -582,20 +582,15 @@ class CloudScraper(Session):
         """
         current_time = time.time()
 
-        # Wait for minimum interval between requests
-        time_since_last_request = current_time - self.last_request_time
-        if time_since_last_request < self.min_request_interval:
-            sleep_time = self.min_request_interval - time_since_last_request
+        # honour the minimum interval between *any* two requests
+        delta = current_time - self.last_request_time
+        if delta < self.min_request_interval:
+            sleep_time = self.min_request_interval - delta
             if self.debug:
-                print(f'⏱️ Request throttling: sleeping {sleep_time:.2f}s')
+                print(f"⏱️ Request throttling: sleeping {sleep_time:.2f}s")
             time.sleep(sleep_time)
 
-        # Wait if too many concurrent requests
-        while self.current_concurrent_requests >= self.max_concurrent_requests:
-            if self.debug:
-                print(f'🚦 Concurrent request limit reached ({self.current_concurrent_requests}/{self.max_concurrent_requests}), waiting...')
-            time.sleep(0.1)
-
+        # just record the timestamp – no while-loop, no slot check
         self.last_request_time = time.time()
 
     def _enter_request_context(self):
