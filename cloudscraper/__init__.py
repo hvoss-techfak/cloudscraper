@@ -1,6 +1,8 @@
 # ------------------------------------------------------------------------------- #
 
 import logging
+import threading
+
 import requests
 import sys
 import ssl
@@ -602,10 +604,29 @@ class CloudScraper(Session):
         Nested (re-entrant) calls, which happen while solving Cloudflare
         challenges, reuse that same slot so they cannot deadlock.
         """
-        top_level = self._request_depth == 0
+        if not hasattr(self, "_slot_owner"):
+            # first time ever
+            self._slot_owner = None
+
+        me = threading.get_ident()
+        top_level = (self._request_depth == 0)
+
         if top_level:
+            # If another thread is holding the only slot we must wait,
+            # but if *we* already own it we can continue immediately.
+            while (self.current_concurrent_requests >= self.max_concurrent_requests and
+                   self._slot_owner not in (None, me)):
+                if self.debug:
+                    print(f"🚦 Concurrent request limit reached "
+                          f"({self.current_concurrent_requests}/{self.max_concurrent_requests}), "
+                          "waiting…")
+                time.sleep(0.1)
+
+            # we are now allowed to enter / re-enter
             self._apply_request_throttling()
             self.current_concurrent_requests += 1
+            self._slot_owner = me                # remember who owns the slot
+
         self._request_depth += 1
         return top_level
 
@@ -617,8 +638,12 @@ class CloudScraper(Session):
         returns early.
         """
         self._request_depth -= 1
+
         if top_level and self.current_concurrent_requests > 0:
             self.current_concurrent_requests -= 1
+            if self.current_concurrent_requests == 0:
+                # slot is free again – no owner
+                self._slot_owner = None
 
     def _rotate_tls_cipher_suite(self):
         """
