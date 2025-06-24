@@ -504,12 +504,18 @@ class CloudScraper(Session):
 
     def _refresh_session(self, url):
         """
-        Refresh the session by clearing cookies and re-establishing connection
+        Refresh the session by clearing cookies and re-establishing a
+        connection.
+
+        * Uses the *raw* requests.Session.request ­– never our own override –
+          so we cannot recurse back into CloudScraper.request().
+        * A guard flag prevents a second refresh entering while the first
+          one is still running.
         """
-        if getattr(self, "_in_refresh_session", False):
-            # Already refreshing in this call-stack – escape immediately
-            #if self.debug:
-            print("Refresh skipped because another refresh is active")
+        if getattr(self, '_in_refresh_session', False):
+            # already inside a refresh in this call-stack – abort
+            if self.debug:
+                print('⤵️  Nested refresh aborted (already refreshing)')
             return False
 
         self._in_refresh_session = True
@@ -530,36 +536,26 @@ class CloudScraper(Session):
                 self.headers.update(self.user_agent.headers)
 
             # Make a simple request to re-establish session
-            try:
-                from urllib.parse import urlparse
-                parsed_url = urlparse(url)
-                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            base_url = f'{parsed.scheme}://{parsed.netloc}'
 
-                # Make a lightweight request to trigger challenge solving
-                test_response = super(CloudScraper, self).get(base_url, timeout=30)
+            # Make a lightweight request to trigger challenge solving
+            probe = Session.request(self, 'GET', base_url, timeout=30)
 
-                if self.debug:
-                    print(f'Session refresh request status: {test_response.status_code}')
-
-                # Only return True if we got a successful response
-                success = test_response.status_code in [200, 301, 302, 304]
-
-                if success and self.debug:
-                    print('✅ Session refresh successful')
-                elif not success and self.debug:
-                    print(f'❌ Session refresh failed with status: {test_response.status_code}')
-
-                return success
-
-            except Exception as e:
-                if self.debug:
-                    print(f'❌ Session refresh failed: {e}')
-                return False
-
-        except Exception as e:
+            ok = probe.status_code in (200, 301, 302, 304)
             if self.debug:
-                print(f'❌ Error during session refresh: {e}')
+                print('✅  Session refresh ok' if ok else
+                      f'❌  Session refresh failed ({probe.status_code})')
+            return ok
+
+        except Exception as exc:
+            if self.debug:
+                print(f'❌  Session refresh raised {exc}')
             return False
+
+        finally:
+            self._in_refresh_session = False
 
     def _clear_cloudflare_cookies(self):
         """
